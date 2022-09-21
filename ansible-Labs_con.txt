@@ -1,0 +1,1050 @@
+
+Note: This is a cheat sheet prepared for easy copying of commands. For detailed
+course material, please use the skillpipe document (https://www.skillpipe.com/) 
+
+Ansible Lab Steps
+=================
+Login to AWS Console
+
+################################################
+Lab 1: Installation and Configuration of Ansible
+################################################
+
+# Launch an RHEL 8 machine in us-east-1. Choose t2.micro. In security group, 
+# allow SSH (22) and HTTP (80) for all incoming traffic. Add Tag Name: Ansible-ControlNode
+
+# Once the EC2 is up & running, SSH into it and set the hostname as 'Control-Node'. 
+sudo hostnamectl set-hostname Control-Node
+# Now you can exit and login again. It will show the new hostname.
+# or you can type 'bash' and open another shell which shows new hostname.
+
+# Update the package repository with latest available versions
+sudo yum check-update
+
+# Install latest version of Python. 
+sudo yum install python3.9 -y
+python3 --version
+
+# Lets link python to python3. Below steps are not mandatory 
+sudo ln -s /usr/bin/python3.9 /usr/bin/python
+python --version
+# It should show Python3.9.6
+
+# Install awscli, boto, boto3 and ansible
+# Boto/Boto3 are AWS SDK which will be needed while accessing AWS APIs
+---------------------------------------------------------------------------
+******if you want to install ansible by yum****(skip if you use python----pip3)******
+wget https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+sudo yum install epel-release-latest-8.noarch.rpm  -y
+sudo yum install ansible -y
+ansible --version
+
+------------------------------------------------------------------------------
+
+
+sudo yum install python3.9 wget -y
+sudo pip3 install awscli boto boto3 ansible==4.10.0
+ansible --version
+pip3 show ansible
+---------------------------------------------------------------------------
+
+# Now configure aws cli to provide the credentials of the IAM user.
+aws configure
+Enter AKID (Access Key)
+Enter SAK (Secret Key)
+
+
+# If you need to create new credentials, Follow below steps
+Go to aws console. On top right corner, click on your name or aws profile id. 
+when the menu opens, click on Security Credentials
+Under AWS IAM Credntials, click on Create access key. If you already have 2 active keys, 
+you can deactivate and delete the older one so that you can create a new key
+
+# Do the below smoke test to check if the configuration has worked. For the below command, you should
+# get a list of your s3 buckets. If you don't have any buckets the command won't output anything.
+# You are ok, as long as it does not give any error.
+aws s3 ls
+
+# Install wget so that we can download playbooks from the training material repository 
+sudo yum install wget -y
+
+# download the playbook for creating 2 EC2 nodes as managed hosts for ansible setup
+
+wget https://hpe-devops-training.s3.amazonaws.com/ec2-playbook.yml
+
+ansible-playbook ec2-playbook.yml
+
+# Once you get the ip addresses, do the following:
+
+sudo vi /etc/ansible/hosts
+
+# Add the prive IP addresses, by pressing "INSERT" 
+< Add Managed Node 1 Private IP >
+< Add Managed Node 2 Private IP >
+172.31.80.253
+172.31.90.114
+
+# Save the file using "ESCAPE + :wq!"
+
+# list all managed node ip addresses.
+ansible all --list-hosts
+
+# SSH into each of them and set the hostnames.
+ssh ec2-user@< Replace Node 1 IP >
+sudo hostnamectl set-hostname managed-node-1
+exit
+
+ssh ec2-user@< Replace Node 2 IP >
+sudo hostnamectl set-hostname managed-node-2
+exit
+
+# Use ping module to check if the managed nodes are able to interpret the ansible modules
+
+ansible all -m ping
+
+# You can see the python script corresponding to 'ping' module here:
+cd /usr/local/lib/python3.9/site-packages/ansible/modules
+ls
+
+
+################################
+Lab 2: Exploring Ad-Hoc Commands
+################################
+
+sudo vi /etc/ansible/hosts
+
+# Add the given line, by pressing "INSERT" 
+# add localhost and add the connection as local so that it wont try to use ssh
+localhost ansible_connection=local
+# save the file using "ESCAPE + :wq!"
+
+# In real life situations, one of the managed node may be used as the ansible control node.
+# In such cases, we can make it a managed node, by adding localhost in hosts inventory file.
+
+
+# get memory details of the hosts using the below ad-hoc command
+ansible all -m command -a "free -h"
+OR
+ansible all -a "free -h"
+
+# Create a user ansible-new in the 2 nodes + the control node
+# This creates the new user and the home directory /home/ansible-new
+ansible all -m user -a "name=ansible-new" --become
+
+# lists all users in the machine. Check if ansible-new is present in the managed nodes / localhost
+ansible <node ip> -a "cat /etc/passwd"
+
+# List all directories in /home. Ensure that directory 'ansible-new' is present in /home. 
+ansible <node ip> -a "ls /home"
+
+
+# Change the permission mode from '700' to '755' for the new home directory created for ansible-new
+ansible < Replace Node 1 IP > -m file -a "dest=/home/ansible-new mode=755" --become
+Ex: ansible 172.31.22.228  -m file -a "dest=/home/ansible-new/ mode=755" --become
+
+# Check if the permissions got changed
+ansible 172.31.22.228 -a "sudo ls -l /home"
+
+
+# Create a new file in the new dir in node 1
+ansible <Node 1 IP> -m file -a "dest=/home/ansible-new/demo.txt mode=600 state=touch" --become
+Ex: ansible 172.31.24.133 -m file -a "dest=/home/ansible-new/demo.txt mode=600 state=touch" --become
+
+# Check if the permissions got changed
+ansible 172.31.31.133 -a "sudo ls -l /home/ansible-new/"
+
+
+# Add content into the file
+ansible <Node 1 IP> -b -m lineinfile -a 'dest=/home/ansible-new/demo.txt line="This server is managed by Ansible"'
+Ex: ansible 172.31.24.133 -b -m lineinfile -a 'dest=/home/ansible-new/demo.txt line="This server is managed by Ansible"'
+
+
+# check if the lines are added in demo.txt
+ansible 172.31.31.133  -a "sudo cat /home/ansible-new/demo.txt"
+
+
+# You can remove the line using parameter state=absent
+ansible 172.31.24.133 -b -m lineinfile -a 'dest=/home/ansible-new/demo.txt line="This server is managed by Ansible" state=absent'
+
+# check if the lines are removed from demo.txt
+ansible 172.31.31.133 -b -a "sudo cat /home/ansible-new/demo.txt"
+
+# Now copy a file from ansible-control node to host node 1
+touch test.txt
+echo "This file will be copied to managed node using copy module" >> test.txt
+
+ansible <Node 1 IP> -m copy -a "src=test.txt dest=/home/ansible-new/test" -b
+Ex: ansible 172.31.24.133 -m copy -a "src=test.txt dest=/home/ansible-new/test" -b
+# --become can be replaced by -b
+
+# check if the file got copied to managed node.
+ansible 172.31.31.133 -b -a "sudo cat /home/ansible-new/test"
+
+
+sudo vi /etc/ansible/hosts
+
+# Remove the below line from hosts inventory file. 
+localhost ansible_connection=local
+
+# save the file using "ESCAPE + :wq!"
+
+
+
+####################################
+Lab 3: Implementing Ansible Playbook
+####################################
+mkdir ansible-labs && cd ansible-labs
+
+Task 1: Playbook to install apache web server
+=============================================
+vi install-apache-pb.yml
+
+# Add the given content, by pressing "INSERT"
+---
+- name: This play will install apache web servers on all the hosts
+  hosts: all
+  become: yes
+  tasks:
+    - name: Task1 will install httpd using yum
+      yum:
+        name: httpd
+        #local cache of the package information available from the repositories configured on the system
+        update_cache: yes
+        state: latest
+    - name: Task2 will upload custom index.html into all hosts
+      copy:
+        src: /home/ec2-user/ansible-labs/index.html
+        dest: /var/www/html
+    - name: Task3 will setup attributes for file
+      file:
+        path: /var/www/html/index.html
+        owner: apache
+        group: apache
+        mode:  0644
+    - name: Task4 will start the httpd
+      service:
+        name: httpd
+        state: started
+
+# save the file using "ESCAPE + :wq!"
+
+# State as 'Present' and 'Installed' are used interchangeably. They both do the same thing i.e. It 
+# will ensure that a desired package is installed. Whereas State as 'Latest' means in addition
+# to installation, it will go ahead and update if it is not of the latest available version.
+
+# Now lets create an index.html file to be used as the landing page for the web server.
+# In task2 of the above playbook, this 'index.html' will be copied to the document root of the 
+# httpd server.
+
+vi index.html
+
+# Add the given content, by pressing "INSERT" 
+
+<html>
+  <body>
+  <h1>Welcome to Ansible Training from CloudThat</h1>
+  <img src= "https://d3ffutjd2e35ce.cloudfront.net/assets/logo1.png" >
+  </body>
+</html>
+
+# save the file using "ESCAPE + :wq!"
+
+# Now run the playbook so that it installs httpd to all the hosts and index.html is copied from 
+# the ansible-control
+ansible-playbook install-apache-pb.yml
+
+# Go to aws console. Copy 'Public IPv4 DNS' name from the instance details.
+# Paste that into a browser and observe that the web page is coming up
+
+
+Task 2: Uninstall apache web server
+===================================
+# With slight modification, we can change the playbook to uninstall apache (self exercise)
+cp install-apache-pb.yml uninstall-apache-pb.yml
+vi uninstall-apache-pb.yml
+# Retain only first task. Replace 'state: latest' with 'state: absent'
+
+# Check if the playbook is ok
+ansible-playbook uninstall-apache-pb.yml --check
+
+# Now run the playbook and check in the browser if the web page exists.
+ansible-playbook uninstall-apache-pb.yml
+
+# Check the browser with the corresponding IPv4 DNS name and ensure webpage is removed.
+
+
+##########################################
+Lab 4: Exploring more on Ansible Playbooks
+##########################################
+
+Task 1: Creating a playbook and adding content to a file
+========================================================
+cd /home/ec2-user/ansible-labs
+vi putfile.yml
+# Add the given content, by pressing "INSERT" 
+
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: Creating a new user cloudthat
+      user:
+        name: cloudthat
+    - name: Creating a directory for the new user
+      file:
+        path: /home/cloudthat
+        state: directory
+
+
+
+# save the file using "ESCAPE + :wq!"
+
+
+ansible-playbook putfile.yml
+
+#Now modify the playbook to add another child directory and a file inside cloudthat's home directory
+vi putfile.yml
+# Add the given content, by pressing "INSERT" 
+
+---
+- hosts: all
+  become: yes
+  tasks:
+    -   name: Creating a new user cloudthat
+        user:
+          name: cloudthat
+    -   name: Creating a directory for the new user
+        file:
+          path: /home/cloudthat
+          state: directory
+    -   name: creating a folder named ansible
+        file:
+          path: /home/cloudthat/ansible
+          state: directory
+    -   name: creating a file within the folder ansible
+        file:
+          path: /home/cloudthat/ansible/hello.txt
+          state: touch
+    -   name: Changing owner and group with permission for the file within the folder named ansible
+        file:
+          path: /home/cloudthat/ansible/hello.txt
+          owner: root
+          group: cloudthat
+          mode: 0665
+    -   name: adding a block of string to the file created named hello.txt
+        blockinfile:
+          path: /home/cloudthat/ansible/hello.txt
+          block: |
+            This is line 1
+            This is line 2
+
+
+# save the file using "ESCAPE + :wq!"
+# if you use '|' then the new line characters will be retained.
+
+# we can execute it step by step
+ansible-playbook putfile.yml --step
+
+# check if the lines are added in hello.txt
+ansible all -a "sudo cat /home/cloudthat/ansible/hello.txt"
+
+# Check if the permissions / ownership is as per the playbook
+ansible all -a "sudo ls -l /home/cloudthat/ansible/"
+
+
+
+#####################################
+Lab 5: Implementing Ansible Variables
+#####################################
+
+cd ~/
+mkdir variable-labs && cd variable-labs
+
+vi implement-vars.yml
+
+# We are using variables, hostname, package1, package2, portno, and path. We are not directly specifying 
+# the value of these variables at their places
+
+# Add the given content, by pressing "INSERT" 
+
+---
+- hosts: '{{ hostname }}'
+  become: yes
+  vars:
+    hostname: all
+    package1: httpd
+    destination: /var/www/html/index.html 
+    source: /home/ec2-user/variable-labs/index.html
+  tasks:
+    - name: Install defined package
+      yum:
+        name: '{{ package1 }}'
+        update_cache: yes
+        state: latest
+    - name: Start desired service
+      service:
+        name: '{{ package1 }}'
+        state: started
+    - name: copy required index.html to the document folder for httpd. 
+      copy:
+        src: '{{ source }}'
+        dest: '{{ destination }}'
+
+# save the file using "ESCAPE + :wq!"
+
+# create index.html in /home/ec2-user/variable-labs/
+
+vi index.html
+
+<html>
+  <body>
+  <h1>This is the Selected Home Page</h1>
+  <h2>Welcome to Cloudthat</h2>
+  <img src= "https://d3ffutjd2e35ce.cloudfront.net/assets/logo1.png" >
+  </body>
+</html>
+
+# save the file using "ESCAPE + :wq!"
+
+$ ansible-playbook implement-vars.yml
+
+# Go to aws console. Copy 'Public IPv4 DNS' name from the instance details.
+# Paste that into a browser and observe that the web page is coming up
+
+# The web page should display the message "This is the Selected Home Page"
+
+
+Task 2 : Create an alternate index_new.html file
+================================================
+# create index_new.html in ~/variable-labs/
+cd /home/ec2-user/variable-labs/
+vi index_new.html
+
+<html>
+  <body>
+  <h1>This is the revised Home Page !! </h1>
+  <img src= "https://d3ffutjd2e35ce.cloudfront.net/assets/logo1.png" >
+  </body>
+</html>
+
+# save the file using "ESCAPE + :wq!"
+
+$ ansible-playbook implement-vars.yml --extra-vars "source=index_new.html"
+
+# Check the home page on browser. It should show the new page now
+# It should show "This is the revised Home Page !!"
+
+
+Task 3 : Use separate variables file
+====================================
+# Move variables to new separate file 
+vi myvariables.yml
+
+add the folowing in the myvariables.yml file.
+
+---
+hostname: all
+package1: httpd
+destination: /var/www/html/index.html
+source: /home/ec2-user/variable-labs/index.html
+...
+
+# save the file using "ESCAPE + :wq!"
+
+
+# Add the given content, by pressing "INSERT" 
+
+# Now edit implement-vars.yml playbook. Replace vars block with vars_file reference.
+vi implement-vars.yml
+
+---
+- hosts: '{{ hostname }}'
+  become: yes
+  vars_files:
+    - myvariables.yml
+  tasks:
+    - name: Install defined package
+      yum:
+        name: '{{ package1 }}'
+        update_cache: yes
+        state: latest
+    - name: Start desired service
+      service:
+        name: '{{ package1 }}'
+        state: started
+    - name: copy required index.html to the document folder for httpd. 
+      copy:
+        src: '{{ source }}'
+        dest: '{{ destination }}'
+
+# save the file using "ESCAPE + :wq!"
+
+$ ansible-playbook implement-vars.yml
+
+# Check the home page on browser. 
+# It should show the original page with msg "This is the Selected Home Page"
+
+
+
+##########################
+Recap Labs : Self Exercises 
+##########################
+cd ~
+mkdir Self-Exercises && cd Self-Exercises
+
+SE-Lab 1: 
+======== 
+Prepare a simple playbook for the below requirements.
+Create a user (User name = your name) in anyone of your managed nodes. 
+
+Prepare the playbook and run it. SSH into the managed node and ensure that it has created the 
+user as well as the home directory. 
+Use sudo ls /home/ to list the home directory and ensure that the user is created.
+
+
+SE-Lab 2: 
+========= 
+Create a folder called ansible-training inside the home directory of the new user you just created.  
+
+SSH into the managed node and do 'sudo ls /home/<user-home-dir>' to confirm that directory ansible-training 
+is created.
+
+
+SE-Lab 3: 
+=========
+How do you convert the below adhoc command to playbook format:
+ansible <Node 1 IP> -m copy -a "src=myfile.txt dest=/home/my-folder/test" --become
+
+
+SE-Lab 4: 
+=========
+How do you convert the below playbook into ad-hoc command format:
+- name: This play will install apache web servers on managed-node-1
+  hosts: <managed-node-1>
+  become: yes
+  tasks:
+    - name: This task will install httpd using yum
+      yum:
+        name: httpd
+        update_cache: yes
+        state: latest
+
+###############################################
+Lab 6 :Task Inclusion
+###############################################
+ add the line in the inventory
+
+vi /etc/ansible/hosts
+
+localhost ansible_connection=local
+
+save the file
+
+------------------------------------------------
+vi first.yaml
+---
+- hosts: localhost
+  gather_facts: no
+  become: yes
+  tasks:
+  - name: install common packages
+    yum:
+      name: [wget, curl]
+      state: present
+
+  - name: inclue task for httpd installation
+    include_tasks: second.yaml
+
+save the file
+----------------------------------------------------------------------------------
+vi second.yaml
+---
+  - name: install the httpd package
+    yum:
+      name: httpd
+      state: latest
+      update_cache: yes
+
+  - name: start the httpd service
+    service:
+      name: httpd
+      state: started
+      enabled: yes
+
+save the file
+----------------------------------------------------------------------------------------
+now  run the first file
+
+# ansible-playbook first.yaml
+
+------------------------------------------------------------------------------------------
+
+vi third.yaml
+---
+- hosts: localhost
+  gather_facts: no
+  become: yes
+  tasks:
+  - name: install common packages
+    yum:
+      name: [wget, curl]
+      state: present
+    register: out
+
+  - name: list result of previous task
+    debug:
+      msg: "{{ out.rc}}"
+
+  - name: inclue task for httpd installation
+    include_tasks: second.yaml
+    when: out.rc == 0
+
+----------------------------------------------------------------------------------
+Now run the third file
+
+ansible-playbook third.yaml
+
+#verify the installed packages on managed node by following commands#
+
+ansible all -m command -a "yum list wget curl" -b
+
+##########################
+Lab 7: Implementing Ansible Vault
+##########################
+
+cd labs
+vi implement-vault.yml
+
+# Add the given content, by pressing "INSERT" 
+
+---
+- hosts: all
+
+  tasks:
+     - file:
+         path: /home/ec2-user/test.conf
+         state: touch
+         owner: ec2-user
+         group: ec2-user
+         mode: 0644
+
+# save the file using "ESCAPE + :wq!"
+
+# Now using the vault utility, encrypt the playbook that we created. Give the passwd of your choice
+# ansible-vault encrypt implement-vault.yml
+
+ansible-vault encrypt implement-vault.yml
+
+#Check if the encrypted file can be viwed using the cat command  
+cat implement-vault.yml
+
+#Using below command, view the encrypted playbook by giving password that is set
+ansible-vault view implement-vault.yml
+
+#For executing the encrypted playbook following command is used
+ansible-playbook --ask-vault-pass implement-vault.yml
+
+#Now edit the playbook, add the below line to it and save the playbook
+ansible-vault edit implement-vault.yml
+
+# Change the mode at the last line
+vi implement-vault.yml
+# change last line as below
+mode: 0755
+
+or 
+
+mode: "u=rw,g=r,o=r"
+
+#Then again execute the playbook with the same command that we used previously
+ansible-playbook --ask-vault-pass implement-vault.yml
+
+#Now if we want to change the password, we can do that with below command
+#Provide the old and new password to reset the password
+ansible-vault rekey implement-vault.yml
+
+#Open the encrypted file and see the content using 
+cat implement-vault.yml
+
+#decrypt the file
+ansible-vault decrypt implement-vault.yml
+
+cat implement-vault.yml
+
+##################################
+Lab 8: Working with ansible functions
+#####################################
+
+Task 1: Loops with Ansible Playbook
+=======================================
+
+vi looplab.yml
+---
+- hosts: all
+  become: yes
+  user: ec2-user
+  connection: ssh
+  tasks:
+    - name: Adding a number of users
+      user: name={{ item }} state=present
+      with_items:
+        - userX
+        - userY
+        - userZ
+
+save the file
+
+ansible-playbook looplab.yml
+
+ansible all -a "tail -n 3 /etc/passwd"
+
+
+Task 2: Tags with Ansible Playbooks
+======================================
+
+
+
+vi tagslabs.yml
+---
+- hosts: all
+  become: yes
+  user: ec2-user
+  connection: ssh
+  gather_facts: no
+  tasks:
+    - name: Install telnet
+      yum: pkg=telnet state=latest
+      tags:
+        - packages
+    - name: Verifying telnet installation
+      raw: yum list installed | grep telnet > /home/ec2-user/pkg.log
+      tags:
+        - logging
+
+
+save the file
+
+ ansible-playbook tagslabs.yml
+
+ansible-playbook -t "logging" tagslabs.yml
+
+ansible-playbook -t "packages" tagslabs.yml
+
+
+
+Task 3: Prompts with Ansible Playbooks
+=========================================
+vi promptlab.yml
+
+---
+- hosts: all
+  become: yes
+  user: ec2-user
+  connection: ssh
+  vars_prompt:
+    - name: pkginstall
+      prompt: Which package do you want to install?
+      default: telnet
+      private: no
+  tasks:
+    - name: Install the package specified
+      yum: pkg={{ pkginstall }} state=latest
+
+ansible-playbook promptlab.yml
+
+=================================================
+Task 4: Until function
+=================================================
+cd ~/
+mkdir until-lab && cd until-lab
+
+vi untillab.yml
+
+---
+- hosts: 172.31.83.62
+  become: yes
+  connection: ssh
+  user: ec2-user
+  tasks:
+  - name: Install Apache Web Server
+    yum:
+       name: httpd
+       state: latest
+  - name: Verify Status of Service
+    shell: systemctl status httpd
+    register: result
+    until: result.stdout.find("active (running)") != -1
+    retries: 5
+    delay: 10
+
+# Execute the lab
+ansible-playbook untillab.yml
+
+# Login to the managed node from another window and start the httpd service
+# You can use the same key (as used for CN) to login to managed node 
+ssh <managed-node>
+sudo service httpd start
+
+# you can check the status of httpd by
+sudo service httpd status
+
+Task 5: Run Once with Ansible Playbook
+======================================
+
+vi rolab.yml
+---
+- hosts: all
+  become: yes
+  user: ec2-user
+  connection: ssh
+  gather_facts: no
+  tasks:
+    - name: Recording uptime on all machines
+      raw: /usr/bin/uptime >> /home/ec2-user/uptime
+      run_once: true
+
+save the file.
+
+
+ansible-playbook rolab.yml
+
+ansible 10.142.0.27 -a "cat /home/ec2-user/uptime"
+
+now open the file and edit parameter as run_once: false 
+
+ansible-playbook rolab.yml
+
+ansible all -a "cat /home/ec2-user/uptime"
+
+Task 6: Blocks with Ansible Playbook
+=====================================
+vi blklab.yml
+---
+- hosts: all
+  become: yes
+  user: ec2-user
+  connection: ssh
+  gather_facts: no
+  tasks:
+    - block:
+        - name: Install {{ web_package }} package
+          yum:
+            name: "{{ web_package }}"
+            state: latest
+      rescue:
+        - name: Install {{ db_package }} package
+          yum:
+            name: "{{ db_package }}"
+            state: latest
+      always:
+        - name: Start {{ db_service }} service
+          service:
+            name: "{{ db_service }}"
+            state: started
+  vars:
+    web_package: httpd
+    db_package: mariadb-server
+    db_service: mariadb
+
+
+save the file
+
+ansible-playbook blklab.yml
+
+http falis becouse package name should be httpd
+
+now edit the package name as httpd it
+
+
+ansible-playbook blklab.yml
+
+#####################################################
+Lab 9: Implementing Jinja2 Templates
+#####################################################
+
+vi new-motd.j2
+
+System information is as below
+Operatingsystem: ‘{{ operatingsystem }}’
+Architecture: ‘{{ architecture }}’
+DistributionVersion: ‘{{ distribution }}’
+
+save the file
+
+vi implement-jinja2.yml
+---
+- hosts: all
+  become: yes
+  vars:
+      operatingsystem: RedHat
+      architecture: x64
+      distribution: 8.0
+
+  tasks:
+    - template:
+         src: new-motd.j2
+         dest: /etc/motd
+         owner: ec2-user
+         group: ec2-user
+         mode: 0644
+
+save the file
+
+ansible-playbook implement-jinja2.yml
+
+Now we will check what our template is exactly doing
+
+ssh ec2-user@< managed_node_ip >
+
+exit from the node
+
+
+
+
+#################################
+Lab 10: Implementing Ansible Roles
+#################################
+
+cd ~/
+
+# Lets uninstall httpd. After that, we will use ansible role to install it.
+$ ansible-playbook /home/ec2-user/ansible-labs/uninstall-apache-pb.yml (Please provide the correct path name)
+
+# Install tree. A tree is a recursive directory listing program that produces a 
+# depth-indented listing of files. 
+sudo yum install tree -y
+
+# You can view your home directory structure in tree format with below command.
+tree .
+tree /home/ec2-user/ansible-labs
+
+# Lets create the code for Role labs
+cd ~/
+mkdir Role-labs && cd Role-labs
+
+# Note : ansible-galaxy init creates an empty directory structure.
+ansible-galaxy init apache
+
+tree apache
+
+cd apache/files
+vi index_lab6.html
+
+<html>
+  <body>
+  <h1>This is the index file for Lab 6 - ansible roles lab! </h1>
+  <img src= "https://d3ffutjd2e35ce.cloudfront.net/assets/logo1.png" >
+  </body>
+</html>
+
+# save the file using "ESCAPE + :wq!"
+
+cd apache/tasks/
+vi main.yml
+
+# Add the given content, by pressing "INSERT" 
+
+- name: install Apache web server
+  yum:
+    name: httpd
+    state: latest
+    update_cache: yes
+- name: copy index file from control node to apache document root in managed node
+  copy:
+    src: ../files/index_lab6.html
+    dest: /var/www/html/index.html
+- name: start httpd
+  service:
+    name: httpd
+    state: started
+
+
+# save the file using "ESCAPE + :wq!"
+
+cd /home/ec2-user/Role-labs
+
+vi implement_roles.yml
+
+# Add the given content, by pressing "INSERT".
+# you should use your ip address 
+---
+- hosts: 172.31.82.103
+  become: yes
+  roles:
+  - apache
+# save the file using "ESCAPE + :wq!"
+
+ansible-playbook implement_roles.yml
+
+# Check the home page on browser. (Public DNS)
+# It will show the webpage with msg "This is the Selected Home Page"
+# index.html is already present in managed node's /var/www/html which 
+# was copied as part of Lab 4.
+
+# We can uninstall httpd. Use the correct poath of your uninstall playbook.
+ansible-playbook /home/ec2-user/ansible-labs/uninstall-apache-pb.yml
+
+
+#######################################
+Lab 11: Install java using ansible galaxy
+#######################################
+
+# Note : Init is to create an empty directory structure, install is to download the written code 
+# from galaxy.ansible.com   
+
+cd /home/ec2-user/Role-labs
+
+# Check if roles directory exists in .ansible. It won't be present.
+ls /home/ec2-user/.ansible/
+
+# Install the role 'geerlingguy.java' from ansible galaxy repository. 
+ansible-galaxy install geerlingguy.java
+
+ls /home/ec2-user/.ansible/roles/geerlingguy.java
+tree ~/.ansible/roles/geerlingguy.java
+
+vi implement-java.yml
+
+# Add the given content, by pressing "INSERT" 
+
+---
+ - hosts: all
+   become: yes
+   roles:
+     - geerlingguy.java
+
+# save the file using "ESCAPE + :wq!"
+
+# Before running the playbook, check if java is installed in managed nodes.
+ansible all -m command -a "java -version"
+# you will get error
+
+# execute playbook from the control node
+ansible-playbook implement-java.yml
+
+# Now, check if java is installed in managed nodes.
+ansible all -a "java -version"
+
+*************************************************************************************
+
+Housekeeping
+===========
+Break Timings: Break1: 11:00am am CET (15 min); Break2: 1:00pm (60 min); Break3: 04:00 pm (15 min)
+
+
+Miscellaneous
+=============
+
+ansible all -m shell -a "ls | grep ec2"
+vs
+ansible all -m command -a "ls | grep ec2"
+
+ansible all -m command -a "free -h | grep Mem"
+vs
+ansible all -m shell -a "free -h | grep Mem"
+
+echo $PATH
+echo "PATH=\$PATH:/usr/local/bin" >> ~/.bashrc
+
+
+
